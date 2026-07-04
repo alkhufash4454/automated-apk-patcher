@@ -49,9 +49,11 @@ jobs:
         # [توضيح ميكانيكي]: هنا يقوم السكربت بفحص صيغة الملف المرفوع تلقائياً
         
         # حالة 1: إذا كان الملف المضغوط هو APKS أو XAPK
-        if [ -f input_app/*.xapk ] || [ -f input_app/*.apks ] || [ -f input_app/*.zip ]; then
+        if ls input_app/*.xapk 1> /dev/null 2>&1 || ls input_app/*.apks 1> /dev/null 2>&1 || ls input_app/*.zip 1> /dev/null 2>&1; then
           echo "[+] تم رصد حزمة مقسمة (XAPK/APKS). جاري فك الضغط والدمج..."
-          mv input_app/*.{xapk,apks,zip} workspace/archive.zip 2>/dev/null || true
+          # Find the first matching file and move it
+          FILE_PATH=$(ls input_app/*.xapk input_app/*.apks input_app/*.zip 2>/dev/null | head -n 1)
+          mv "$FILE_PATH" workspace/archive.zip
           unzip workspace/archive.zip -d workspace/extracted/
           
           # دمج الملفات المقسمة إلى APK واحد أساسي
