@@ -43,13 +43,14 @@ jobs:
       run: |
         mkdir -p input_app output_app workspace
         
-        # التحقق من وجود ملفات حزم مقسمة ودمجها تلقائياً
-        if [ -f input_app/*.xapk ] || [ -f input_app/*.apks ] || [ -f input_app/*.zip ]; then
-          echo "[+] تم رصد حزمة مقسمة (XAPK/APKS). جاري فك الضغط والدمج..."
-          mv input_app/*.{xapk,apks,zip} workspace/archive.zip 2>/dev/null || true
+        # [تعديل آمن]: البحث عن أي ملف مضغوط ونقله مباشرة
+        FOUND_ARCHIVE=$(find input_app/ -name "*.xapk" -o -name "*.apks" -o -name "*.zip" | head -n 1)
+        
+        if [ ! -z "$FOUND_ARCHIVE" ]; then
+          echo "[+] تم العثور على الحزمة المقسمة: $FOUND_ARCHIVE"
+          cp "$FOUND_ARCHIVE" workspace/archive.zip
           unzip workspace/archive.zip -d workspace/extracted/
           
-          # [تصحيح]: استدعاء اسم السكربت الصحيح بعد التحديث الأخير للأداة
           python tools/merge-apks/mergeapks.py -i workspace/extracted/ -o workspace/merged_base.apk
           mv workspace/merged_base.apk input_app/target.apk
         fi
