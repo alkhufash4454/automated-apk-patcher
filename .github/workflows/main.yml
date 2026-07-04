@@ -1,0 +1,85 @@
+name: Automated APK Patcher (All Formats)
+
+on:
+  workflow_dispatch: # يتيح لك تشغيل العملية يدوياً من موقع GitHub تيسيراً عليك
+
+jobs:
+  patch-process:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+
+    - name: Set up Python 3.x
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Install System Dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y unzip wget curl git
+
+    - name: Download Automation Tools
+      run: |
+        mkdir -p tools
+        cd tools
+        # 1. تثبيت أدوات الأتمتة عبر pip
+        pip install reflutter frida-tools pyghidra capstone pyelftools
+        
+        # 2. تحميل أداة التوقيع الذكي
+        LATEST_SIGNER_URL=$(curl -s https://api.github.com/repos/patrickfav/uber-apk-signer/releases/latest | grep "browser_download_url.*\.jar" | cut -d '"' -f 4)
+        wget -O uber-apk-signer.jar "$LATEST_SIGNER_URL"
+        
+        # 3. تحميل سكربت دمج الحزم المقسمة
+        git clone https://github.com/LuigiVampa92/merge-apks.git
+        cd ..
+
+    - name: Process, Merge, and Patch Application
+      run: |
+        mkdir -p input_app output_app workspace
+        
+        # [توضيح ميكانيكي]: هنا يقوم السكربت بفحص صيغة الملف المرفوع تلقائياً
+        
+        # حالة 1: إذا كان الملف المضغوط هو APKS أو XAPK
+        if [ -f input_app/*.xapk ] || [ -f input_app/*.apks ] || [ -f input_app/*.zip ]; then
+          echo "[+] تم رصد حزمة مقسمة (XAPK/APKS). جاري فك الضغط والدمج..."
+          mv input_app/*.{xapk,apks,zip} workspace/archive.zip 2>/dev/null || true
+          unzip workspace/archive.zip -d workspace/extracted/
+          
+          # دمج الملفات المقسمة إلى APK واحد أساسي
+          python tools/merge-apks/merge_apks.py workspace/extracted/ workspace/merged_base.apk
+          mv workspace/merged_base.apk input_app/target.apk
+        fi
+        
+        # حالة 2: إذا كان امتداد الملف جاهزاً كـ APK عادي من البداية
+        if [ -f input_app/*.apk ] && [ ! -f input_app/target.apk ]; then
+          mv input_app/*.apk input_app/target.apk
+        fi
+
+        echo "[+] بدء معالجة وتعديل ملف الـ APK الأساسي..."
+        # تشغيل أداة reFlutter للتعديل التلقائي (هنا كمثال يتم تمرير الأوامر للأداة)
+        # ملاحظة: يمكنك تخصيص الأوامر حسب متطلبات التطبيق لديك
+        reflutter input_app/target.apk <<EOF
+        1
+        127.0.0.1
+        EOF
+        
+        # نقل الملف المعدل الناتج من reFlutter
+        mv input_app/target.RE.apk workspace/patched.apk
+
+        echo "[+] جاري إعادة توقيع التطبيق ليكون قابلاً للتثبيت..."
+        java -jar tools/uber-apk-signer.jar --allowResign -a workspace/patched.apk --out output_app/
+
+    - name: Upload Ready Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: Patched-Ready-APK
+        path: output_app/*.apk
