@@ -57,7 +57,8 @@ jobs:
           unzip workspace/archive.zip -d workspace/extracted/
           
           # دمج الملفات المقسمة إلى APK واحد أساسي
-          python tools/merge-apks/merge-apks.py workspace/extracted/ workspace/merged_base.apk
+          ls -R tools/
+          python tools/merge-apks/merge-apks.py workspace/extracted/ workspace/merged_base.apk || python tools/merge-apks/merge_apks.py workspace/extracted/ workspace/merged_base.apk
           mv workspace/merged_base.apk input_app/target.apk
         fi
         
