@@ -25,7 +25,7 @@ jobs:
     - name: Install System Dependencies
       run: |
         sudo apt update
-        sudo apt install -y unzip wget curl git
+        sudo apt install -y unzip wget curl git apktool zipalign
 
     - name: Download Automation Tools
       run: |
@@ -37,6 +37,8 @@ jobs:
         wget -O uber-apk-signer.jar "$LATEST_SIGNER_URL"
         
         git clone https://github.com/LuigiVampa92/merge-apks.git
+        # تطبيق إصلاح aapt2 على أداة merge-apks
+        sed -i "s/\['apktool', 'b', main_apk_dir\]/\['apktool', 'b', '--use-aapt2', main_apk_dir\]/g" merge-apks/mergeapks.py
         cd ..
 
     - name: Process, Merge, and Patch Application
@@ -50,30 +52,49 @@ jobs:
           cp "$FOUND_ARCHIVE" workspace/archive.zip
           unzip workspace/archive.zip -d workspace/extracted/
           
-          # تجميع كافة ملفات الـ APK المستخرجة وتمريرها في سطر واحد للأداة
-          ALL_APKS=$(find workspace/extracted/ -name "*.apk" | tr '\n' ' ')
+          # الانتقال لمجلد الملفات المستخرجة لتجنب مشاكل المسارات في أداة الدمج
+          cd workspace/extracted/
+          ALL_APKS=$(find . -maxdepth 1 -name "*.apk" | tr '\n' ' ')
           
           echo "[+] جاري دمج ملفات الـ APK التالية:"
           echo "$ALL_APKS"
           
-          # تشغيل الأداة وحفظ الملف الناتج باسم merged_base.apk
-          python tools/merge-apks/mergeapks.py $ALL_APKS
+          python3 ../../tools/merge-apks/mergeapks.py $ALL_APKS
           
-          # الأداة تخرج الملف المدمج بنفس مجلد السكربت عادة أو باسم مخصص، سنبحث عنه وننقله
-          mv workspace/extracted/*_merged.apk input_app/target.apk 2>/dev/null || mv *.apk input_app/target.apk 2>/dev/null || mv workspace/merged_base.apk input_app/target.apk 2>/dev/null || mv output.apk input_app/target.apk 2>/dev/null || true
+          # نقل الملف المدمج الناتج (result.apk) إلى المجلد الرئيسي
+          cd ../../
+          mv workspace/extracted/result.apk input_app/target.apk
         fi
         
+        # إذا لم يكن هناك xapk ولكن يوجد apk عادي
         if [ -f input_app/*.apk ] && [ ! -f input_app/target.apk ]; then
           mv input_app/*.apk input_app/target.apk
         fi
 
-        echo "[+] بدء معالجة وتعديل ملف الـ APK الأساسي..."
+        if [ ! -f input_app/target.apk ]; then
+          echo "[-] خطأ: لم يتم العثور على ملف APK للمعالجة!"
+          exit 1
+        fi
+
+        echo "[+] بدء معالجة وتعديل ملف الـ APK الأساسي باستخدام reflutter..."
+        # reflutter قد يخرج الملف باسم release.RE.apk أو target.RE.apk
         reflutter input_app/target.apk <<EOF
         1
         127.0.0.1
         EOF
         
-        mv input_app/target.RE.apk workspace/patched.apk
+        # البحث عن الملف الناتج من reflutter ونقله
+        PATCHED_APK=$(find . -maxdepth 1 -name "*.RE.apk" | head -n 1)
+        if [ -z "$PATCHED_APK" ]; then
+            PATCHED_APK=$(find input_app/ -maxdepth 1 -name "*.RE.apk" | head -n 1)
+        fi
+
+        if [ ! -z "$PATCHED_APK" ]; then
+            mv "$PATCHED_APK" workspace/patched.apk
+        else
+            echo "[-] خطأ: فشل reflutter في إنتاج ملف معدل!"
+            exit 1
+        fi
 
         echo "[+] جاري إعادة توقيع التطبيق ليكون قابلاً للتثبيت..."
         java -jar tools/uber-apk-signer.jar --allowResign -a workspace/patched.apk --out output_app/
