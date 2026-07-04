@@ -1,7 +1,7 @@
 name: Automated APK Patcher (All Formats)
 
 on:
-  workflow_dispatch: # يتيح لك تشغيل العملية يدوياً من موقع GitHub تيسيراً عليك
+  workflow_dispatch:
 
 jobs:
   patch-process:
@@ -31,14 +31,11 @@ jobs:
       run: |
         mkdir -p tools
         cd tools
-        # 1. تثبيت أدوات الأتمتة عبر pip
         pip install reflutter frida-tools pyghidra capstone pyelftools
         
-        # 2. تحميل أداة التوقيع الذكي
         LATEST_SIGNER_URL=$(curl -s https://api.github.com/repos/patrickfav/uber-apk-signer/releases/latest | grep "browser_download_url.*\.jar" | cut -d '"' -f 4)
         wget -O uber-apk-signer.jar "$LATEST_SIGNER_URL"
         
-        # 3. تحميل سكربت دمج الحزم المقسمة
         git clone https://github.com/LuigiVampa92/merge-apks.git
         cd ..
 
@@ -46,36 +43,27 @@ jobs:
       run: |
         mkdir -p input_app output_app workspace
         
-        # [توضيح ميكانيكي]: هنا يقوم السكربت بفحص صيغة الملف المرفوع تلقائياً
-        
-        # حالة 1: إذا كان الملف المضغوط هو APKS أو XAPK
-        if ls input_app/*.xapk 1> /dev/null 2>&1 || ls input_app/*.apks 1> /dev/null 2>&1 || ls input_app/*.zip 1> /dev/null 2>&1; then
+        # التحقق من وجود ملفات حزم مقسمة ودمجها تلقائياً
+        if [ -f input_app/*.xapk ] || [ -f input_app/*.apks ] || [ -f input_app/*.zip ]; then
           echo "[+] تم رصد حزمة مقسمة (XAPK/APKS). جاري فك الضغط والدمج..."
-          # Find the first matching file and move it
-          FILE_PATH=$(ls input_app/*.xapk input_app/*.apks input_app/*.zip 2>/dev/null | head -n 1)
-          mv "$FILE_PATH" workspace/archive.zip
+          mv input_app/*.{xapk,apks,zip} workspace/archive.zip 2>/dev/null || true
           unzip workspace/archive.zip -d workspace/extracted/
           
-          # دمج الملفات المقسمة إلى APK واحد أساسي
-          ls -R tools/
-          python tools/merge-apks/merge-apks.py workspace/extracted/ workspace/merged_base.apk || python tools/merge-apks/merge_apks.py workspace/extracted/ workspace/merged_base.apk
+          # [تصحيح]: استدعاء اسم السكربت الصحيح بعد التحديث الأخير للأداة
+          python tools/merge-apks/mergeapks.py -i workspace/extracted/ -o workspace/merged_base.apk
           mv workspace/merged_base.apk input_app/target.apk
         fi
         
-        # حالة 2: إذا كان امتداد الملف جاهزاً كـ APK عادي من البداية
         if [ -f input_app/*.apk ] && [ ! -f input_app/target.apk ]; then
           mv input_app/*.apk input_app/target.apk
         fi
 
         echo "[+] بدء معالجة وتعديل ملف الـ APK الأساسي..."
-        # تشغيل أداة reFlutter للتعديل التلقائي (هنا كمثال يتم تمرير الأوامر للأداة)
-        # ملاحظة: يمكنك تخصيص الأوامر حسب متطلبات التطبيق لديك
         reflutter input_app/target.apk <<EOF
         1
         127.0.0.1
         EOF
         
-        # نقل الملف المعدل الناتج من reFlutter
         mv input_app/target.RE.apk workspace/patched.apk
 
         echo "[+] جاري إعادة توقيع التطبيق ليكون قابلاً للتثبيت..."
