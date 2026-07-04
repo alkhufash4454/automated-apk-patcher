@@ -43,7 +43,6 @@ jobs:
       run: |
         mkdir -p input_app output_app workspace
         
-        # [تعديل آمن]: البحث عن أي ملف مضغوط ونقله مباشرة
         FOUND_ARCHIVE=$(find input_app/ -name "*.xapk" -o -name "*.apks" -o -name "*.zip" | head -n 1)
         
         if [ ! -z "$FOUND_ARCHIVE" ]; then
@@ -51,8 +50,17 @@ jobs:
           cp "$FOUND_ARCHIVE" workspace/archive.zip
           unzip workspace/archive.zip -d workspace/extracted/
           
-          python tools/merge-apks/mergeapks.py -i workspace/extracted/ -o workspace/merged_base.apk
-          mv workspace/merged_base.apk input_app/target.apk
+          # تجميع كافة ملفات الـ APK المستخرجة وتمريرها في سطر واحد للأداة
+          ALL_APKS=$(find workspace/extracted/ -name "*.apk" | tr '\n' ' ')
+          
+          echo "[+] جاري دمج ملفات الـ APK التالية:"
+          echo "$ALL_APKS"
+          
+          # تشغيل الأداة وحفظ الملف الناتج باسم merged_base.apk
+          python tools/merge-apks/mergeapks.py $ALL_APKS
+          
+          # الأداة تخرج الملف المدمج بنفس مجلد السكربت عادة أو باسم مخصص، سنبحث عنه وننقله
+          mv workspace/extracted/*_merged.apk input_app/target.apk 2>/dev/null || mv *.apk input_app/target.apk 2>/dev/null || mv workspace/merged_base.apk input_app/target.apk 2>/dev/null || mv output.apk input_app/target.apk 2>/dev/null || true
         fi
         
         if [ -f input_app/*.apk ] && [ ! -f input_app/target.apk ]; then
