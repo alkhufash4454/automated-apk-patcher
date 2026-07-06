@@ -1,10 +1,10 @@
-name: Automated APK Patcher (All Formats)
+name: Smart APK Patcher & SSL Bypass
 
 on:
   workflow_dispatch:
 
 jobs:
-  patch-process:
+  smart-patch:
     runs-on: ubuntu-latest
 
     steps:
@@ -22,85 +22,55 @@ jobs:
       with:
         python-version: '3.10'
 
-    - name: Install System Dependencies
+    - name: Install Dependencies
       run: |
         sudo apt update
         sudo apt install -y unzip wget curl git apktool zipalign
-
-    - name: Download Automation Tools
-      run: |
-        mkdir -p tools
-        cd tools
         pip install reflutter frida-tools pyghidra capstone pyelftools
         
+        # Download Uber APK Signer
         LATEST_SIGNER_URL=$(curl -s https://api.github.com/repos/patrickfav/uber-apk-signer/releases/latest | grep "browser_download_url.*\.jar" | cut -d '"' -f 4)
-        wget -O uber-apk-signer.jar "$LATEST_SIGNER_URL"
-        
-        git clone https://github.com/LuigiVampa92/merge-apks.git
-        # تطبيق إصلاح aapt2 على أداة merge-apks
-        sed -i "s/\['apktool', 'b', main_apk_dir\]/\['apktool', 'b', '--use-aapt2', main_apk_dir\]/g" merge-apks/mergeapks.py
-        cd ..
+        wget -O tools/uber-apk-signer.jar "$LATEST_SIGNER_URL"
 
-    - name: Process, Merge, and Patch Application
+    - name: Smart Process & Patch
       run: |
-        mkdir -p input_app output_app workspace
+        mkdir -p workspace output_app
         
+        # 1. Check for split packages (XAPK, APKS, ZIP)
         FOUND_ARCHIVE=$(find input_app/ -name "*.xapk" -o -name "*.apks" -o -name "*.zip" | head -n 1)
         
         if [ ! -z "$FOUND_ARCHIVE" ]; then
-          echo "[+] تم العثور على الحزمة المقسمة: $FOUND_ARCHIVE"
-          cp "$FOUND_ARCHIVE" workspace/archive.zip
-          unzip workspace/archive.zip -d workspace/extracted/
+          echo "[+] Split package detected: $FOUND_ARCHIVE"
+          unzip "$FOUND_ARCHIVE" -d workspace/extracted/
           
-          # الانتقال لمجلد الملفات المستخرجة لتجنب مشاكل المسارات في أداة الدمج
-          cd workspace/extracted/
-          ALL_APKS=$(find . -maxdepth 1 -name "*.apk" | tr '\n' ' ')
-          
-          echo "[+] جاري دمج ملفات الـ APK التالية:"
-          echo "$ALL_APKS"
-          
-          python3 ../../tools/merge-apks/mergeapks.py $ALL_APKS
-          
-          # نقل الملف المدمج الناتج (result.apk) إلى المجلد الرئيسي
-          cd ../../
-          mv workspace/extracted/result.apk input_app/target.apk
-        fi
-        
-        # إذا لم يكن هناك xapk ولكن يوجد apk عادي
-        if [ -f input_app/*.apk ] && [ ! -f input_app/target.apk ]; then
-          mv input_app/*.apk input_app/target.apk
+          # Use Advanced Merge Script
+          python3 tools/advanced_merge.py workspace/extracted/ workspace/merged.apk
+          TARGET_APK="workspace/merged.apk"
+        else
+          # Single APK
+          TARGET_APK=$(find input_app/ -name "*.apk" | head -n 1)
         fi
 
-        if [ ! -f input_app/target.apk ]; then
-          echo "[-] خطأ: لم يتم العثور على ملف APK للمعالجة!"
+        if [ -z "$TARGET_APK" ] || [ ! -f "$TARGET_APK" ]; then
+          echo "[-] Error: No APK found to process!"
           exit 1
         fi
 
-        echo "[+] بدء معالجة وتعديل ملف الـ APK الأساسي باستخدام reflutter..."
-        # reflutter قد يخرج الملف باسم release.RE.apk أو target.RE.apk
-        reflutter input_app/target.apk <<EOF
-        1
-        127.0.0.1
-        EOF
+        # 2. Smart Patching (SSL Bypass + Flutter Support)
+        echo "[+] Starting Smart Patcher..."
+        python3 tools/smart_patcher.py "$TARGET_APK"
         
-        # البحث عن الملف الناتج من reflutter ونقله
-        PATCHED_APK=$(find . -maxdepth 1 -name "*.RE.apk" | head -n 1)
-        if [ -z "$PATCHED_APK" ]; then
-            PATCHED_APK=$(find input_app/ -maxdepth 1 -name "*.RE.apk" | head -n 1)
+        if [ ! -f "patched_ready.apk" ]; then
+          echo "[-] Error: Smart patching failed!"
+          exit 1
         fi
 
-        if [ ! -z "$PATCHED_APK" ]; then
-            mv "$PATCHED_APK" workspace/patched.apk
-        else
-            echo "[-] خطأ: فشل reflutter في إنتاج ملف معدل!"
-            exit 1
-        fi
+        # 3. Final Signing & Alignment
+        echo "[+] Finalizing APK (Sign & Align)..."
+        java -jar tools/uber-apk-signer.jar --allowResign -a patched_ready.apk --out output_app/
 
-        echo "[+] جاري إعادة توقيع التطبيق ليكون قابلاً للتثبيت..."
-        java -jar tools/uber-apk-signer.jar --allowResign -a workspace/patched.apk --out output_app/
-
-    - name: Upload Ready Artifact
+    - name: Upload Results
       uses: actions/upload-artifact@v4
       with:
-        name: Patched-Ready-APK
+        name: Smart-Patched-APK
         path: output_app/*.apk
