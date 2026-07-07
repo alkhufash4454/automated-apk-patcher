@@ -1,10 +1,10 @@
-name: Smart APK Patcher & SSL Bypass
+name: Smart XAPK Patcher (SSL Bypass)
 
 on:
   workflow_dispatch:
 
 jobs:
-  smart-patch:
+  xapk-patch:
     runs-on: ubuntu-latest
 
     steps:
@@ -25,52 +25,29 @@ jobs:
     - name: Install Dependencies
       run: |
         sudo apt update
-        sudo apt install -y unzip wget curl git apktool zipalign
+        sudo apt install -y unzip wget curl git apktool zipalign zip
         pip install reflutter frida-tools pyghidra capstone pyelftools
         
         # Download Uber APK Signer
+        mkdir -p tools
         LATEST_SIGNER_URL=$(curl -s https://api.github.com/repos/patrickfav/uber-apk-signer/releases/latest | grep "browser_download_url.*\.jar" | cut -d '"' -f 4)
         wget -O tools/uber-apk-signer.jar "$LATEST_SIGNER_URL"
 
-    - name: Smart Process & Patch
+    - name: Patch XAPK
       run: |
-        mkdir -p workspace output_app
+        mkdir -p output_app
+        INPUT_XAPK=$(find input_app/ -name "*.xapk" -o -name "*.apks" -o -name "*.zip" | head -n 1)
         
-        # 1. Check for split packages (XAPK, APKS, ZIP)
-        FOUND_ARCHIVE=$(find input_app/ -name "*.xapk" -o -name "*.apks" -o -name "*.zip" | head -n 1)
-        
-        if [ ! -z "$FOUND_ARCHIVE" ]; then
-          echo "[+] Split package detected: $FOUND_ARCHIVE"
-          unzip "$FOUND_ARCHIVE" -d workspace/extracted/
-          
-          # Use Advanced Merge Script
-          python3 tools/advanced_merge.py workspace/extracted/ workspace/merged.apk
-          TARGET_APK="workspace/merged.apk"
-        else
-          # Single APK
-          TARGET_APK=$(find input_app/ -name "*.apk" | head -n 1)
-        fi
-
-        if [ -z "$TARGET_APK" ] || [ ! -f "$TARGET_APK" ]; then
-          echo "[-] Error: No APK found to process!"
+        if [ -z "$INPUT_XAPK" ]; then
+          echo "[-] Error: No XAPK/APKS found in input_app/"
           exit 1
         fi
-
-        # 2. Smart Patching (SSL Bypass + Flutter Support)
-        echo "[+] Starting Smart Patcher..."
-        python3 tools/smart_patcher.py "$TARGET_APK"
         
-        if [ ! -f "patched_ready.apk" ]; then
-          echo "[-] Error: Smart patching failed!"
-          exit 1
-        fi
-
-        # 3. Final Signing & Alignment
-        echo "[+] Finalizing APK (Sign & Align)..."
-        java -jar tools/uber-apk-signer.jar --allowResign -a patched_ready.apk --out output_app/
+        echo "[+] Processing XAPK: $INPUT_XAPK"
+        python3 tools/xapk_patcher.py "$INPUT_XAPK" "output_app/patched_app.xapk"
 
     - name: Upload Results
       uses: actions/upload-artifact@v4
       with:
-        name: Smart-Patched-APK
-        path: output_app/*.apk
+        name: Patched-XAPK-Ready
+        path: output_app/*.xapk
